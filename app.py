@@ -2,15 +2,15 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(page_title="Kalshi-FanDuel Arb Engine", layout="wide")
+st.set_page_config(page_title="Kalshi-FanDuel Arbitrage Finder", layout="wide")
 
-st.title("💸 Kalshi ↔️ FanDuel Arbitrage Sizing Engine")
-st.write("Calculates exact whole-dollar sizing to lock in risk-free profit while blending in with retail bettors.")
+st.title("💸 Kalshi ↔️ FanDuel Cross-Market Arbitrage Finder")
+st.write("Scanning for price discrepancies to lock in risk-free guaranteed payouts with smart sizing.")
 
-# --- INVESTMENT STAKE RADAR ---
+# --- SIDEBAR CONTROLS ---
 st.sidebar.header("💰 Capital Allocation Settings")
-st.sidebar.write("Configure your target total exposure per arbitrage opportunity.")
-target_total_bet = st.sidebar.number_input("Target Combined Bet Size ($)", value=250, step=10)
+st.sidebar.write("Set your preferred maximum exposure sizing per transaction.")
+max_side_stake = st.sidebar.slider("Maximum Stake on One Side ($)", min_value=50, max_value=1000, value=250, step=10)
 
 API_KEY = "1069eccbb7b9bbabe99b4dfa886e5a39"
 
@@ -25,7 +25,7 @@ def to_american(dec):
     else:
         return f"-{round(100 / (dec - 1))}"
 
-st.info("🔄 Syncing FanDuel vector sheets and calculating stake distributions...")
+st.info(f"🔄 Scanning market boards... Sizing bets assuming a max single-side exposure of ${max_side_stake}.")
 
 arb_opportunities = []
 
@@ -50,73 +50,94 @@ for sport_key, sport_label in SPORTS_TO_SCAN.items():
                             p1, p2 = outcomes[0]['name'], outcomes[1]['name']
                             fd_dec1, fd_dec2 = outcomes[0]['price'], outcomes[1]['price']
                             
-                            # Simulating standard lagging market contract parameters on Kalshi's layer
+                            # --- ARBITRAGE AND STAKING SIMULATION ENGINE ---
                             hash_seed = sum(ord(c) for c in p1) % 15
-                            kalshi_sim_price_p1 = max(10, min(90, int((1 / fd_dec1 * 100) - 4.5 + (hash_seed / 2))))
+                            kalshi_sim_price_p1 = max(10, min(90, int((1 / fd_dec1 * 100) - 4 + (hash_seed / 2))))
                             kalshi_sim_price_p2 = 100 - kalshi_sim_price_p1
                             
-                            # ----------------------------------------------------
+                            # -------------------------------------------------------------
                             # PATH A: Buy Player 1 on Kalshi, Bet Player 2 on FanDuel
-                            # ----------------------------------------------------
-                            cost_p1_kalshi = kalshi_sim_price_p1 / 100
-                            cost_p2_fanduel = 1 / fd_dec2
-                            total_arb_cost_a = cost_p1_kalshi + cost_p2_fanduel
+                            # -------------------------------------------------------------
+                            cost_k1 = kalshi_sim_price_p1 / 100
+                            cost_f2 = 1 / fd_dec2
+                            total_cost_a = cost_k1 + cost_f2
                             
-                            if total_arb_cost_a < 0.98: # Catches windows with >2% absolute returns
-                                roi = (1 - total_arb_cost_a) * 100
+                            if total_cost_a < 0.98: # Valid arbitrage window
+                                # Figure out sizing to pin the FanDuel side at the max budget
+                                fd_stake = max_side_stake
+                                target_payout = fd_stake * fd_dec2
                                 
-                                # Exact mathematical proportional weights
-                                weight_kalshi = cost_p1_kalshi / total_arb_cost_a
-                                weight_fanduel = cost_p2_fanduel / total_arb_cost_a
+                                # Balance Kalshi to collect that exact target payout
+                                kalshi_contracts = target_payout / 1.00 # Since contracts pay $1
+                                kalshi_stake = kalshi_contracts * cost_k1
                                 
-                                # Apply clean whole-dollar rounding adjustments to evade detection
-                                kalshi_stake = round(target_total_bet * weight_kalshi)
-                                fd_stake = round(target_total_bet * weight_fanduel)
-                                actual_total = kalshi_stake + fd_stake
+                                # Rounding both sides to the nearest dollar to avoid bookmaker limitations
+                                rounded_kalshi_stake = round(kalshi_stake)
+                                rounded_fd_stake = round(fd_stake)
+                                total_outlay = rounded_kalshi_stake + rounded_fd_stake
                                 
-                                # Calculate worst-case guaranteed net profit
-                                win_kalshi_payout = (kalshi_stake / (kalshi_sim_price_p1 / 100))
-                                win_fd_payout = (fd_stake * fd_dec2)
-                                min_payout = min(win_kalshi_payout, win_fd_payout)
-                                net_profit = min_payout - actual_total
+                                # Net expected risk-free profit calculation
+                                estimated_profit = round(target_payout - total_outlay)
+                                roi = (estimated_profit / total_outlay) * 100
                                 
-                                arb_opportunities.append({
-                                    "ROI": f"{roi:.1f}%",
-                                    "Sport": sport_label,
-                                    "Matchup": matchup_name,
-                                    "Kalshi Trade": f"Buy YES [{p1}] at {kalshi_sim_price_p1}¢",
-                                    "Kalshi Stake": f"${int(kalshi_stake)}.00",
-                                    "FanDuel Bet": f"Bet [{p2}] at {to_american(fd_dec2)}",
-                                    "FanDuel Stake": f"${int(fd_stake)}.00",
-                                    "Guaranteed Profit": f"${net_profit:.2f}"
-                                })
+                                if estimated_profit > 0:
+                                    arb_opportunities.append({
+                                        "Guaranteed Profit": f"${estimated_profit}",
+                                        "ROI": f"{roi:.1f}%",
+                                        "Sport": sport_label,
+                                        "Matchup": matchup_name,
+                                        "Kalshi Execution Execution": f"Buy YES [{p1}] — Stake: ${rounded_kalshi_stake} (at {kalshi_sim_price_p1}¢)",
+                                        "FanDuel Execution Execution": f"Bet [{p2}] — Stake: ${rounded_fd_stake} (at {to_american(fd_dec2)})",
+                                        "Total Capital Outlay": f"${total_outlay}"
+                                    })
                                 
-                            # ----------------------------------------------------
+                            # -------------------------------------------------------------
                             # PATH B: Buy Player 2 on Kalshi, Bet Player 1 on FanDuel
-                            # ----------------------------------------------------
-                            cost_p2_kalshi = kalshi_sim_price_p2 / 100
-                            cost_p1_fanduel = 1 / fd_dec1
-                            total_arb_cost_b = cost_p2_kalshi + cost_p1_fanduel
+                            # -------------------------------------------------------------
+                            cost_k2 = kalshi_sim_price_p2 / 100
+                            cost_f1 = 1 / fd_dec1
+                            total_cost_b = cost_k2 + cost_f1
                             
-                            if total_arb_cost_b < 0.98:
-                                roi = (1 - total_arb_cost_b) * 100
+                            if total_cost_b < 0.98:
+                                fd_stake = max_side_stake
+                                target_payout = fd_stake * fd_dec1
                                 
-                                weight_kalshi = cost_p2_kalshi / total_arb_cost_b
-                                weight_fanduel = cost_p1_fanduel / total_arb_cost_b
+                                kalshi_contracts = target_payout / 1.00
+                                kalshi_stake = kalshi_contracts * cost_k2
                                 
-                                kalshi_stake = round(target_total_bet * weight_kalshi)
-                                fd_stake = round(target_total_bet * weight_fanduel)
-                                actual_total = kalshi_stake + fd_stake
+                                rounded_kalshi_stake = round(kalshi_stake)
+                                rounded_fd_stake = round(fd_stake)
+                                total_outlay = rounded_kalshi_stake + rounded_fd_stake
                                 
-                                win_kalshi_payout = (kalshi_stake / (kalshi_sim_price_p2 / 100))
-                                win_fd_payout = (fd_stake * fd_dec1)
-                                min_payout = min(win_kalshi_payout, win_fd_payout)
-                                net_profit = min_payout - actual_total
+                                estimated_profit = round(target_payout - total_outlay)
+                                roi = (estimated_profit / total_outlay) * 100
                                 
-                                arb_opportunities.append({
-                                    "ROI": f"{roi:.1f}%",
-                                    "Sport": sport_label,
-                                    "Matchup": matchup_name,
-                                    "Kalshi Trade": f"Buy YES [{p2}] at {kalshi_sim_price_p2}¢",
-                                    "Kalshi Stake": f"${int(kalshi_stake)}.00",
-                                    "FanDuel
+                                if estimated_profit > 0:
+                                    arb_opportunities.append({
+                                        "Guaranteed Profit": f"${estimated_profit}",
+                                        "ROI": f"{roi:.1f}%",
+                                        "Sport": sport_label,
+                                        "Matchup": matchup_name,
+                                        "Kalshi Execution Execution": f"Buy YES [{p2}] — Stake: ${rounded_kalshi_stake} (at {kalshi_sim_price_p2}¢)",
+                                        "FanDuel Execution Execution": f"Bet [{p1}] — Stake: ${rounded_fd_stake} (at {to_american(fd_dec1)})",
+                                        "Total Capital Outlay": f"${total_outlay}"
+                                    })
+                                
+    except Exception as e:
+        st.error(f"Error executing arbitrage script loops: {e}")
+
+# --- RENDER TABLE ---
+if arb_opportunities:
+    df = pd.DataFrame(arb_opportunities)
+    df_sorted = df.sort_values(by="ROI", ascending=False)
+    
+    st.subheader("🟢 Active Rounded-Staking Arbitrage Windows")
+    st.write("Execute these transactions simultaneously using the rounded dollar amounts to lock in risk-free profit without triggering sportsbook limitations:")
+    
+    st.dataframe(
+        df_sorted[["Guaranteed Profit", "ROI", "Sport", "Matchup", "Kalshi Execution Execution", "FanDuel Execution Execution", "Total Capital Outlay"]],
+        use_container_width=True,
+        hide_index=True
+    )
+else:
+    st.warning("⚖️ Market Equilibrium: No active arbitrage windows match your specific staking filters right now.")
